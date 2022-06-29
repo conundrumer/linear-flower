@@ -55,6 +55,10 @@
           this.parameters[key] = 0
         }
         localStorage.parameters = JSON.stringify(this.parameters)
+      },
+      handleWheel(e, key) {
+        this.parameters[key] += e.deltaY / (e.deltaMode === 0 ? 1 : 4) / 1000
+        localStorage.parameters = JSON.stringify(this.parameters)
       }
     }"
   >
@@ -74,7 +78,7 @@
                 class="number"
                 type="number"
                 @input="e => handleChange(e, key)"
-                @wheel="parameters[key] += $event.deltaY / ($event.deltaMode === 0 ? 1 : 4) / 1000; handleChange()"
+                @wheel="e => handleWheel(e, key)"
                 x-model.number="parameters[key]"
               >
               <span x-text="key"></span>
