@@ -11,8 +11,11 @@
 
   <style>
     body {
-      height:100vh;
       margin: 0;
+      overflow: hidden;
+    }
+    main {
+      height:100vh;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
       background-color: black;
       color: white;
@@ -35,18 +38,7 @@
   </style>
 </head>
 <body>
-  <div id="info" style="margin: 16px;">
-    <h1>Linear Flower</h1>
-    <p>
-      A study on origami projection mapping.
-    </p>
-    <p> twitter & instagram: @conundrumer </p>
-  </div>
-  <div style="margin: 16px;">
-    <p>Visuals generated live, repeats after 6 minutes</p>
-    <p>Origami design by Ron Resch</p>
-  </div>
-  <footer
+  <main
     x-data="{
       show: true,
       parameters: JSON.parse(localStorage.parameters),
@@ -62,32 +54,46 @@
       }
     }"
   >
-    <button @click="show = !show" x-text="show ? 'Hide Controls' : 'Show Controls'"></button>
-    <div x-show="show">
-      <template x-for="(value, key) in parameters">
-        <div>
-          <template x-if="typeof value === 'boolean'">
-            <span>
-              <input type="checkbox" @change="handleChange" x-model="parameters[key]">
-              <span x-text="key"></span>
-            </span>
-          </template>
-          <template x-if="typeof value === 'number' || value == null">
-            <span>
-              <input
-                class="number"
-                type="number"
-                @input="e => handleChange(e, key)"
-                @wheel="e => handleWheel(e, key)"
-                x-model.number="parameters[key]"
-              >
-              <span x-text="key"></span>
-            </span>
-          </template>
-        </div>
-      </template>
-      Usage: hover over number inputs and use scroll wheel to tweak parameters until aligned, then turn off "test"
+    <div id="info" style="margin: 16px;">
+      <h1>Linear Flower</h1>
+      <p>
+        A study on audiovisual origami projection mapping.
+      </p>
+      <p> twitter & instagram: @conundrumer </p>
     </div>
-  </footer>
+    <div style="margin: 16px;">
+      <p>Audio and visuals generated live. 6 sequences. Repeats after <span><span x-text="Math.max(1, parameters.period * 6).toFixed(0)"></span></span> minutes.</p>
+      <p>Origami design by Ron Resch</p>
+    </div>
+
+    <footer>
+      <button @click="show = !show" x-text="show ? 'Hide Controls' : 'Show Controls'"></button>
+      <div x-show="show">
+        <template x-for="(value, key) in parameters">
+          <div>
+            <template x-if="typeof value === 'boolean'">
+              <span>
+                <input type="checkbox" @change="handleChange" x-model="parameters[key]">
+                <span x-text="key"></span>
+              </span>
+            </template>
+            <template x-if="typeof value === 'number' || value == null">
+              <span>
+                <input
+                  class="number"
+                  type="number"
+                  @input="e => handleChange(e, key)"
+                  @wheel="e => handleWheel(e, key)"
+                  x-model.number="parameters[key]"
+                >
+                <span x-text="key"></span>
+              </span>
+            </template>
+          </div>
+        </template>
+        Usage: hover over number inputs and use scroll wheel to tweak parameters until aligned, then turn off "test"
+      </div>
+    </footer>
+  </main>
 </body>
 </html>

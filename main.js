@@ -1,7 +1,36 @@
+/* sound test */
+
+const audioContext = new AudioContext()
+// if (audioContext.state !== 'running') {
+//   window.addEventListener('click', () => {
+//     audioContext.resume().then(() => {
+//       console.log(audioContext.state)
+//     })
+//   }, { once: true })
+// }
+const audioPrompt = document.getElementById("audio-prompt")
+const audioOn = document.getElementById("audio-on")
+const audioOff = document.getElementById("audio-off")
+const audioHide = document.getElementById("audio-hide")
+audioOn.onclick = () => {
+  audioContext.resume()
+  window.removeEventListener('click', audioOn.onclick)
+}
+document.body.addEventListener('click', audioOn.onclick, { once: true })
+audioOff.onclick = () => {
+  audioContext.suspend()
+  window.removeEventListener('click', audioOn.onclick)
+}
+audioHide.onclick = () => audioPrompt.remove()
+document.addEventListener('keydown', e => e.key == "Escape" && audioPrompt.remove())
+/* rest */
+
 noise.seed(Math.random())
 
 const PERIOD = 60
+const getPeriod = () => Math.max(1/6, parameters.period) * 60
 const NUM_PHASES = 6
+const NUM_TURTLES = 16
 
 const forRange = (n, cb) => {
   for (let i = 0; i < n; i++) {
@@ -42,15 +71,17 @@ const softEnds = (x, x0) => {
 if (!localStorage.parameters) {
   localStorage.parameters = JSON.stringify({
     phase: 0,
-    test: true,
+    test: false,
     x: 0,
     y: 0,
-    zoom: 0,
+    zoom: -0.5,
     rotation: 0,
     keystoneX: 0,
     keystoneY: 0,
     distance: 0,
-    offsetY: 0
+    offsetY: 0,
+    flipSound: false,
+    period: 2,
   })
 }
 let parameters = JSON.parse(localStorage.parameters)
@@ -144,6 +175,12 @@ class LinearFlower {
         })
       }
     }
+
+    this.indexToFace = {}
+    for (let face of this.faces) {
+      const {index, row, col} = face
+      this.indexToFace[`${index}-${row}-${col}`] = face
+    }
   }
   genShape(m = 1 - (8 + 3 * Math.SQRT2) / 8.5 * (8.5 - 7.75) / 4) {
     const mrows = this.mrows
@@ -232,6 +269,10 @@ class LinearFlower {
 
     return {vs, w, h}
   }
+
+  getCoords(index, row, col) {
+    return this.indexToFace[`${index}-${row}-${col}`]
+  }
 }
 
 const cellBack = [2, 12]
@@ -308,8 +349,8 @@ class CellGraph {
       twistiness: lerp(0, 0.8, Math.random())
     }))
   }
-  update(t) {
-    this.turtles.forEach(turtle => {
+  update(t, onStep) {
+    this.turtles.forEach((turtle, j) => {
       if (turtle.counter <= 0) {
         const adjacent = cellGraph[turtle.index]
         let nextIndex = adjacent[turtle.dir] || adjacent.X
@@ -318,6 +359,10 @@ class CellGraph {
           const [dir, i] = a[ilerp(0, a.length - 1, Math.random())]
           turtle.dir = dir
           nextIndex = i
+
+          if (onStep) {
+            onStep(j, turtle.index, turtle.module[0], turtle.module[1], true)
+          }
         }
         const [dx, dy] = getCellGraphCrossing(turtle.index, nextIndex)
         const [row, col] = turtle.module
@@ -328,6 +373,10 @@ class CellGraph {
         turtle.index = nextIndex
         turtle.module = [nextRow, nextCol]
         turtle.counter = (turtle.period | 0) + (Math.random() < (turtle.period % 1) ? 1 : 0)
+
+        if (onStep) {
+          onStep(j, nextIndex, nextRow, nextCol, false)
+        }
       } else {
         turtle.counter--
       }
@@ -335,10 +384,11 @@ class CellGraph {
   }
 }
 class Pattern {
-  constructor(linearFlower, pointLight, ambientLight) {
+  constructor(linearFlower, pointLight, ambientLight, synth) {
     this.linearFlower = linearFlower
     this.pointLight = pointLight
     this.ambientLight = ambientLight
+    this.synth = synth
     this.canvas = document.createElement("canvas")
     this.canvas.width = 1024
     this.canvas.height = 1024
@@ -346,7 +396,7 @@ class Pattern {
     this.canvas2 = this.canvas.cloneNode()
     this.canvas3 = this.canvas.cloneNode()
 
-    this.graph = new CellGraph(linearFlower.mrows, linearFlower.mcols, 32)
+    this.graph = new CellGraph(linearFlower.mrows, linearFlower.mcols, NUM_TURTLES)
   }
   drawFaces(canvas, cb) {
     const ctx = canvas.getContext('2d')
@@ -385,29 +435,41 @@ class Pattern {
     ctx.fillRect(0, 0, canvas.width, canvas.height)
   }
   drawPhase(t, phase, canvas) {
+    const deltaT = this.prevT ? Math.max(1/60, Math.min(5/60, Math.abs(t - this.prevT))) : 0
+
     const ctx = canvas.getContext('2d')
     this.fill("black", canvas)
     ctx.save()
     switch (phase) {
       case 0:
+        this.fill("white", canvas)
+
         // shadows
-        this.drawFaces(canvas, (index, row, col, x, y) => {
-          ctx.fillStyle = "white"
-          if (index === 0 || cellRing.includes(index)) {
-            ctx.fillStyle = "#CCF"
-          }
-          if (index === 16 || cellFlower.includes(index)) {
-            ctx.fillStyle = "#FCC"
-          }
-          return 1
-        })
+        // this.drawFaces(canvas, (index, row, col, x, y) => {
+        //   ctx.fillStyle = "white"
+        //   if (index === 0 || cellRing.includes(index)) {
+        //     ctx.fillStyle = "#CCF"
+        //   }
+        //   if (index === 16 || cellFlower.includes(index)) {
+        //     ctx.fillStyle = "#FCC"
+        //   }
+        //   return 1
+        // })
         break
       case 1:
         // rectangle waves
         this.drawFaces(canvas, (index, row, col, x, y) => {
+          // 2: h, 12: v
           if (cellBack.includes(index)) {
             const rgb = [-1, 0, 1].map(dt => 255 * exp(1 - Math.abs(noise.simplex3(1 * x, 1 * y, t / 3 + dt / 20)), 3))
             ctx.fillStyle = `rgb(${rgb.join(",")})`
+
+            const delta = Math.abs((rgb[0] - rgb[2]) / 255)
+            const a = rgb[1] / 255 * delta
+            if (this.synth && this.synth.updateWave) {
+              this.synth.updateWave(index, row, col, a)
+            }
+            // console.log(row, col, index)
             return 1
           }
         })
@@ -427,18 +489,26 @@ class Pattern {
             const i = cellRing.indexOf(index)
             const [dx, dy] = cellRingDeltas[i]
             const I = (6 * (row + dy) + (col + dx)) / 35
-            const k = i / (cellRing.length - 1) + t * lerp(0.1, 0.5, I)
+            const k = i / (cellRing.length - 1) + t * lerp(0.1, 0.5, I) + 1/4
             const a = exp(0.5 + 0.5 * Math.cos(2 * Math.PI * k), 3)
             ctx.fillStyle = `rgb(${255*a},${240*a**2},${240*a**2})`
             return 1
           }
         })
+        if (this.synth && this.synth.updateRotors) {
+          this.synth.updateRotors(t)
+        }
         break
       case 3:
         // wireframe waves
         ctx.globalCompositeOperation = "lighter"
+        // if (this.synth.cancelWire && deltaT > 0) {
+        //   this.synth.cancelWire()
+        // }
         this.drawFaces(canvas, (index, row, col, x, y) => {
+          // if (!(row == 0 && col == 0)) return
           const a = noise.simplex3(2 * x, 2 * y, t / 5)
+          const prevA = noise.simplex3(2 * x, 2 * y, (t - deltaT) / 5)
           const b = Math.abs(a)
           const c = 255 * log(1 - b, -8)
           const kr = exp(1 - (a < 0 ? -a : 0), 0)
@@ -450,6 +520,15 @@ class Pattern {
           ]
           ctx.strokeStyle = `rgb(${rgb.join(",")})`
           ctx.lineWidth = 4
+
+
+          if (this.synth && this.synth.triggerWire) {
+            if (Math.sign(a) != Math.sign(prevA)) {
+              const k = a / (a - prevA) * 1/60 / deltaT
+              this.synth.triggerWire(deltaT * k, Math.abs(a - prevA), row, col)
+            }
+          }
+
           return 2
         })
         break
@@ -472,9 +551,19 @@ class Pattern {
             return 1
           }
         })
+        if (this.synth && this.synth.updateLines) {
+          this.synth.updateLines(t)
+        }
         break
       case 5:
-        this.graph.update(t)
+        let onStep
+        if (this.synth && this.synth.triggerTurtle) {
+          onStep = (i, index, row, col, turn) => {
+            const {x, y} = this.linearFlower.getCoords(index, row, col)
+            this.synth.triggerTurtle(turn, x, y, i, deltaT * Math.random())
+          }
+        }
+        this.graph.update(t, onStep)
         ctx.globalCompositeOperation = "lighter"
         this.drawFaces(canvas, (index, row, col, x, y) => {
           const dt = t - this.graph.modules[row][col][index]
@@ -494,8 +583,8 @@ class Pattern {
   }
   draw(t) {
     const fadeSpeed = 1/5
-    const phase = Math.floor(t / PERIOD) % NUM_PHASES
-    const k = t % PERIOD
+    let phase = Math.floor(t / getPeriod()) % NUM_PHASES
+    const k = t % getPeriod()
     const fadeIn = Math.min(1, k * fadeSpeed)
     const fadeOut = Math.max(0, 1 - k * fadeSpeed)
 
@@ -507,12 +596,19 @@ class Pattern {
       this.setPointLightIntensity(0)
     }
 
-    // this.drawPhase(t, 0, this.canvas)
-    // this.setPointLightIntensity(1)
-    // return
+    // phase = 4
+    // if (this.synth) {
+    //   this.synth.setMix(t, phase, 0)
+    // }
 
-    // this.drawPhase(t, 4, this.canvas)
+    // this.drawPhase(t, phase, this.canvas)
+    // this.setPointLightIntensity(1)
+
+    // this.drawPhase(t,phase, this.canvas)
     // this.setPointLightIntensity(0)
+
+    // this.prevT = t
+
     // return
 
     this.drawPhase(t, phase, this.canvas)
@@ -524,10 +620,614 @@ class Pattern {
       ctx.drawImage(this.canvas2, 0, 0)
       ctx.restore()
     }
+
+    if (this.synth) {
+      this.synth.setMix(t, phase, fadeOut)
+    }
+
+    this.prevT = t
   }
-  drawTest() {
+  drawTest(t) {
     this.fill("white", this.canvas)
     this.setPointLightIntensity(1)
+
+    if (this.synth) {
+      this.synth.setMix(t, 0)
+    }
+  }
+}
+
+class Synth {
+  /**
+   * @param {AudioContext} ctx
+   */
+  constructor(ctx) {
+    this.ctx = ctx
+
+    this.limiter = this.ctx.createDynamicsCompressor()
+    this.limiter.connect(this.ctx.destination)
+
+    // setTimeout(() => {
+    //   this.limiter.disconnect()
+    //   setTimeout(() => {
+    //     this.limiter.connect(this.ctx.destination)
+    //   }, 2000)
+    // }, 2000)
+
+    /* noise source */
+    {
+      this.noises = array(6, () => {
+        var bufferSize = 2 * audioContext.sampleRate,
+        noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate),
+        output = noiseBuffer.getChannelData(0);
+        for (var i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        var whiteNoise = audioContext.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+        whiteNoise.loop = true;
+        whiteNoise.start(0);
+
+        return whiteNoise
+      })
+    }
+
+    this.mixes = [
+      this.initShadow(),
+      this.initWaves(),
+      this.initRotors(),
+      this.initWires(),
+      this.initLines(),
+      this.initTurtles()
+    ]
+    for (let mix of this.mixes) {
+      mix.gain.setValueAtTime(0, 0)
+    }
+    this.currentPhase = -1
+    this.prevPhase = -1
+  }
+  setMix(t, phase, fadeOut) {
+    if (fadeOut === 0 && this.currentPhase !== -1) {
+      this.mixes[this.currentPhase].gain.setTargetAtTime(1, 0, 1/60)
+    }
+    if (fadeOut === 0 && this.prevPhase !== -1 && this.currentPhase !== this.prevPhase) {
+      // this.mixes[this.prevPhase].gain.setValueAtTime(0, 0)
+      this.mixes[this.prevPhase].disconnect()
+      // console.log('disconnecting prev', this.prevPhase)
+      this.prevPhase = -1
+    }
+    if (phase !== this.currentPhase) {
+      if (this.currentPhase !== -1) {
+        // this.mixes[this.currentPhase].gain.setValueAtTime(0, 0)
+        this.mixes[this.currentPhase].disconnect()
+        // console.log('disconnecting current', this.currentPhase)
+      }
+      this.mixes[phase].connect(this.limiter)
+      // console.log('connecting current', phase)
+      // this.mixes[phase].gain.setValueAtTime(0, 0)
+      this.currentPhase = phase
+    }
+    if (fadeOut > 0 && this.prevPhase === -1) {
+      this.prevPhase = (NUM_PHASES + phase - 1) % NUM_PHASES
+      this.mixes[this.prevPhase].connect(this.limiter)
+      // console.log('connecting prev', this.prevPhase)
+
+      // this.mixes[this.prevPhase].gain.setValueAtTime(0, 0)
+    }
+    if (fadeOut > 0) {
+      this.mixes[this.currentPhase].gain.setTargetAtTime(1 - fadeOut, 0, 1/60)
+      this.mixes[this.prevPhase].gain.setTargetAtTime(fadeOut, 0, 1/60)
+    }
+  }
+  initShadow() {
+    function makeDistortionCurve(amount) {
+      const k = typeof amount === 'number' ? amount : 50,
+        n_samples = 44100,
+        curve = new Float32Array(n_samples),
+        deg = Math.PI / 180;
+
+      let x;
+      for (let i = 0 ; i < n_samples; ++i ) {
+        x = i * 2 / n_samples - 1;
+        curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
+      }
+      return curve;
+    };
+
+    const oscHi = this.ctx.createOscillator()
+    const oscHiV = this.ctx.createOscillator()
+    const oscLo = this.ctx.createOscillator()
+    const oscLoV = this.ctx.createOscillator()
+    const gHi = this.ctx.createGain()
+    const gHiV = this.ctx.createGain()
+    const gLo = this.ctx.createGain()
+    const gLoV = this.ctx.createGain()
+    const g3 = this.ctx.createGain()
+    const distortion = this.ctx.createWaveShaper()
+    const filterPre = this.ctx.createBiquadFilter()
+    const filterPost = this.ctx.createBiquadFilter()
+    distortion.curve = makeDistortionCurve(400);
+    // distortion.oversample = '2x';
+    filterPre.type = "lowpass"
+    filterPre.Q.setValueAtTime(1, 0)
+    filterPre.frequency.setValueAtTime(800, 0)
+    filterPost.type = "lowpass"
+    filterPost.Q.setValueAtTime(0, 0)
+    filterPost.frequency.setValueAtTime(600, 0)
+
+
+    // const gn = this.ctx.createGain()
+    // gn.gain.setValueAtTime(0.1, 0)
+    // this.noise.connect(gn)
+
+    // const fn = this.ctx.createBiquadFilter()
+    // fn.type = "highpass"
+    // fn.Q.setValueAtTime(0.3, 0)
+    // fn.frequency.setValueAtTime(2000, 0)
+    // gn.connect(fn)
+
+    const pan = this.ctx.createStereoPanner()
+    oscHi.connect(gHi)
+    oscLo.connect(gLo)
+    oscHiV.connect(gHiV)
+    gHiV.connect(gHi)
+    oscLoV.connect(gLoV)
+    gLoV.connect(gLo)
+    // fn.connect(filterPre)
+    gHi.connect(filterPre)
+    gLo.connect(filterPre)
+    filterPre.connect(distortion)
+    distortion.connect(filterPost)
+    filterPost.connect(pan)
+    pan.connect(g3)
+
+    oscHi.start()
+    oscLo.start()
+    oscHiV.start()
+    oscLoV.start()
+    gHi.gain.setValueAtTime(0, 0)
+    gLo.gain.setValueAtTime(0, 0)
+    gHiV.gain.setValueAtTime(0.15, 0)
+    gLoV.gain.setValueAtTime(0.15, 0)
+
+    // g2.gain.setValueAtTime(0, 0)
+    oscHi.frequency.setValueAtTime(55 * 5/4 * 3, 0)
+    oscHiV.frequency.setValueAtTime(55 * 5/4 * 3, 0)
+    oscLo.frequency.setValueAtTime(55 * 5/4 * 2, 0)
+    oscLoV.frequency.setValueAtTime(55 * 5/4 * 2, 0)
+    oscHiV.detune.setValueAtTime(7, 0)
+    oscLoV.detune.setValueAtTime(13, 0)
+
+    const shadowGain1 = gHi.gain
+    const shadowGain2 = gLo.gain
+    const shadowPan = pan.pan
+
+    this.updateShadow = (x, y, delta) => {
+      x *= 0.25
+      y = unit(-5, 5, y)
+      if (parameters.flipSound) {
+        y = 1 - y
+      }
+      const g = lerp(0.003, 1, (delta * 5) ** 3)
+      const p = x * (parameters.flipSound ? -1 : 1)
+      shadowGain1.setTargetAtTime(g * y, 0, 1/60)
+      shadowGain2.setTargetAtTime(g * (1 - y), 0, 1/60)
+      shadowPan.setTargetAtTime(p, 0, 1/60)
+    }
+
+    return g3
+  }
+  initWaves() {
+    const freqs = [
+      31,
+      29,
+      27,
+      24,
+      22,
+      19,
+      17,
+      15,
+      12,
+      10,
+      7,
+      3,
+      0,
+    ].map(n => 2 ** (n / 12) * 110 * 5/4)
+
+    const mix = this.ctx.createGain()
+
+    /** @type {AudioParam[][]} */
+    const waveNodes = array(13, i => {
+      const odd = i & 1
+      const maxJ = odd ? 7 : 6
+      return array(maxJ, j => {
+        const osc = this.ctx.createOscillator()
+        // osc.type = "triangle"
+        osc.frequency.setValueAtTime(freqs[i], 0)
+        osc.detune.setValueAtTime(lerp(-15, 15, unit(0, maxJ - 1, j)), 0)
+        osc.start()
+
+        const g = this.ctx.createGain()
+        g.gain.setValueAtTime(0, 0)
+
+        const p = this.ctx.createStereoPanner()
+
+        p.pan.setValueAtTime(lerp(-1, 1, (odd ? j : (j + 0.5)) / 6), 0)
+
+        osc.connect(g)
+        g.connect(p)
+        p.connect(mix)
+
+        return g.gain
+      })
+    })
+
+    this.updateWave = (index, row, col, a) => {
+      a *= 0.2
+
+      let i = 2 * row + (index == 12 ? 1 : 0)
+      let j = col
+      if (parameters.flipSound) {
+        i = 12 - i
+        j = ((i % 2 == 0) ? 5 : 6) - j
+      }
+      const pitchHeight =  unit(0, 12, i)
+      waveNodes[i][j].setTargetAtTime(a * lerp(0.4, 1, pitchHeight), 0, 1/60)
+    }
+
+    return mix
+  }
+  initWires() {
+    const mix = this.ctx.createGain()
+    let cabinet
+
+    {
+      const ks = [
+      {b: [0.998427797774257, -1.996855595548515, 0.998427797774258],
+      a: [1.000000000000000, -1.996729031901556, 0.996982159195472]},
+
+      {b: [1.71381752013609, -3.59123502602204, 1.89042101128582],
+      a: [1.000000000000000, -1.946518614625237, 0.959522120025104]},
+
+      // {b: [2.44712046192491, -5.07920063666641, 2.71162250478877],
+      // a: [1.000000000000000, -1.847874331025749, 0.92741666107301]},
+
+      // {b: [0.0744394809810769, 0.1488789619621539, 0.0744394809810770],
+      // a: [1.000000000000000, -1.433046457023383, 0.730804380947690]},
+      ]
+      const filters = array(ks.length, i => this.ctx.createIIRFilter(ks[i].b, ks[i].a))
+      for (let i = 0; i < ks.length-1; i++) {
+        filters[i].connect(filters[i+1])
+      }
+      filters[ks.length-1].connect(mix)
+      cabinet = filters[0]
+    }
+
+    const mainFilter = this.ctx.createBiquadFilter()
+    mainFilter.type = "lowpass"
+    mainFilter.frequency.setValueAtTime(10000, 0)
+    mainFilter.Q.setValueAtTime(0.1, 0)
+
+    const f2 = this.ctx.createBiquadFilter()
+    f2.type = "peaking"
+    f2.frequency.setValueAtTime(5000, 0)
+    f2.gain.setValueAtTime(-18, 0)
+
+    // mainFilter.connect(cabinet)
+    // cabinet.connect(mix)
+    // cabinet.connect(f2)
+    mainFilter.connect(f2)
+    f2.connect(mix)
+    // mainFilter.connect(mix)
+
+    const pans = array(6, i => {
+      const pan = this.ctx.createStereoPanner()
+      pan.pan.setValueAtTime(lerp(-1, 1, i/5), 0)
+
+      this.noises[i].connect(pan)
+
+      return pan
+    })
+    const filters = array(6, i => {
+      const freq = lerp(16000, 8000, exp(i/5, -0.5))
+      console.log(freq)
+
+      const filter = this.ctx.createBiquadFilter()
+      filter.type = "bandpass"
+      filter.frequency.setValueAtTime(freq, 0)
+      filter.Q.setValueAtTime(0.6, 0)
+      filter.connect(mainFilter)
+
+      return filter
+    })
+    const gains = array(6, i => {
+      return array(6, j => {
+        const g = this.ctx.createGain()
+        g.gain.setValueAtTime(0, 0)
+
+        pans[j].connect(g)
+        g.connect(filters[i])
+
+        return g
+      })
+    })
+    this.triggerWire = (t, a, row, col) => {
+      // if (!this.cancelWire && this.ctx.state == "running") {
+      //   this.cancelWire = () => {
+      //     for (let row of gains) {
+      //       for (let g of row) {
+      //         g.gain.cancelScheduledValues(0)
+      //       }
+      //     }
+      //   }
+      // }
+      row = Math.min(5, row)
+      col = Math.min(5, col)
+      if (a < 1e-3) return
+
+      if (parameters.flipSound) {
+        row = 5 - row
+        col = 5 - col
+      }
+      // a *= lerp(0.3, 1, unit(0, 5, row))
+      a = Math.min(1, 60 * a)
+
+      const time = this.ctx.currentTime + t
+      const g = gains[row][col]
+      const attack = 2e-3
+      const decay = 1e-2
+      g.gain.setTargetAtTime(a, time, attack)
+      g.gain.setTargetAtTime(0, time + attack, decay)
+    }
+
+
+    // this.noise.connect(g)
+
+    // const osc = this.ctx.createOscillator()
+    // osc.start()
+    // osc.connect(g)
+
+    return mix
+  }
+  initTurtles() {
+    const mix = this.ctx.createGain()
+
+    const mainFilter = this.ctx.createBiquadFilter()
+    mainFilter.type = "lowpass"
+    mainFilter.frequency.setValueAtTime(10000, 0)
+    mainFilter.Q.setValueAtTime(0.1, 0)
+
+    const f2 = this.ctx.createBiquadFilter()
+    f2.type = "peaking"
+    f2.frequency.setValueAtTime(5000, 0)
+    f2.gain.setValueAtTime(-18, 0)
+
+    mainFilter.connect(f2)
+    f2.connect(mix)
+
+    const turtles = array(NUM_TURTLES, i => {
+      return array(1, j => {
+        const noise = this.noises[i % this.noises.length]
+
+        const g = this.ctx.createGain()
+        g.gain.setValueAtTime(0, 0)
+
+        const p = this.ctx.createStereoPanner()
+
+        const filter = this.ctx.createBiquadFilter()
+        filter.type = "bandpass"
+        filter.Q.setValueAtTime(j == 0 ? 3 : 20, 0)
+
+        noise.connect(g)
+        g.connect(p)
+        p.connect(filter)
+        filter.connect(mainFilter)
+
+        return {
+          gain: g.gain,
+          freq: filter.frequency,
+          pan: p.pan
+        }
+      })
+    })
+    this.triggerTurtle = (isTurn, x, y, i, t) => {
+      if (isTurn) return
+      if (parameters.flipSound) {
+        x = 1-x
+        y = 1-y
+      }
+      const time = this.ctx.currentTime + t
+
+      const turtle = turtles[i][isTurn ? 1 : 0]
+      if (!turtle) debugger
+
+      const a = 10 / NUM_TURTLES
+      const f = lerp(8000, 1000, exp(y + Math.random() * 1e-2, -1))
+      const p = lerp(-1, 1, x)
+
+      const attack = 1e-3
+      const decay = isTurn ? 0.05 : 1.3e-2
+      turtle.gain.setTargetAtTime(a, time, attack)
+      turtle.gain.setTargetAtTime(0, time + attack, decay)
+      turtle.freq.setValueAtTime(f, 0)
+      turtle.pan.setValueAtTime(p, 0)
+    }
+
+    return mix
+  }
+  initRotors() {
+    const mix = this.ctx.createGain()
+    const volume = this.ctx.createGain()
+    volume.gain.setValueAtTime(1/36 * 2.5, 0)
+
+    const mainFilter = this.ctx.createBiquadFilter()
+    mainFilter.type = "lowpass"
+    mainFilter.frequency.setValueAtTime(2000, 0)
+    mainFilter.Q.setValueAtTime(0.5, 0)
+
+    mainFilter.connect(volume)
+    volume.connect(mix)
+
+    const filters = array(6, i => {
+      const freq = lerp(1000, 110 * 3/2, exp(i/5, -0.5))
+      console.log(freq)
+
+      const filter = this.ctx.createBiquadFilter()
+      filter.type = "bandpass"
+      filter.frequency.setValueAtTime(freq, 0)
+      filter.Q.setValueAtTime(1.5, 0)
+      filter.connect(mainFilter)
+
+      return filter
+    })
+    const detunes = array(6, i => {
+      return array(6, j => {
+        const osc1 = this.ctx.createOscillator()
+        const osc2 = this.ctx.createOscillator()
+        osc1.type = "square"
+        osc2.type = "square"
+        osc1.frequency.setValueAtTime(110 * 3/2 * 3/2, 0)
+        osc2.frequency.setValueAtTime(110 * 3/2, 0)
+        osc1.start()
+        osc2.start()
+
+        const pan = this.ctx.createStereoPanner()
+        pan.pan.setValueAtTime(lerp(-1, 1, i/5), 0)
+
+        osc1.connect(pan)
+        osc2.connect(pan)
+        pan.connect(filters[j])
+
+        return [osc1.detune, osc2.detune]
+      })
+    })
+    this.updateRotors = t => {
+      forRange(6, i => {
+        forRange(6, j => {
+          if (parameters.flipSound) {
+            i = 5 - i
+            j - 5 - j
+          }
+          const I = (6 * j + i) / 35
+          let p1 = Math.cos(2 * Math.PI * t * lerp(0.2, 0.7, I))
+          let p2 = Math.cos(2 * Math.PI * (t * lerp(0.1, 0.5, I)))
+          const k = -0.7
+          p1 = Math.sign(p1) * exp(Math.abs(p1), k)
+          p2 = Math.sign(p2) * exp(Math.abs(p2), k)
+
+          detunes[i][j][0].setTargetAtTime(p1 * 100 + 100, 0, 1/60)
+          detunes[i][j][1].setTargetAtTime(p2 * 100 + 100, 0, 1/60)
+        })
+      })
+    }
+
+    return mix
+  }
+  initLines() {
+    const F = 55 * 4/5
+    const mix = this.ctx.createGain()
+    const volume = this.ctx.createGain()
+    volume.gain.setValueAtTime(1/28 * 3, 0)
+    volume.connect(mix)
+
+    const mainOsc = this.ctx.createOscillator()
+    mainOsc.type = "sawtooth"
+    mainOsc.frequency.setValueAtTime(F, 0)
+    mainOsc.start()
+
+    const N = 7
+    const rows = array(N, i => {
+
+      return array(2, j => {
+        const osc = this.ctx.createOscillator()
+        osc.type = j == 0 ? "sawtooth" : "triangle"
+        const freq = (9 - i) * F
+        osc.frequency.setValueAtTime(freq, 0)
+        osc.start()
+
+        const pan = this.ctx.createStereoPanner()
+        const gain = this.ctx.createGain()
+        gain.gain.setValueAtTime(0, 0)
+
+        osc.connect(pan)
+        pan.connect(gain)
+
+        if (j == 0) {
+          const filter = this.ctx.createBiquadFilter()
+          filter.frequency.setValueAtTime(freq * 2, 0)
+          gain.connect(filter)
+          filter.connect(volume)
+        } else {
+          gain.connect(volume)
+        }
+
+        return {pan: pan.pan, gain: gain.gain}
+      })
+    })
+    const cols = array(N, i => {
+      const pan = this.ctx.createStereoPanner()
+      pan.pan.setValueAtTime(lerp(-1, 1, i / (N - 1)), 0)
+
+      pan.connect(volume)
+      return array(2, j => {
+
+        const gain = this.ctx.createGain()
+        gain.gain.setValueAtTime(0, 0)
+
+        const filter = this.ctx.createBiquadFilter()
+        filter.type = "bandpass"
+        filter.Q.setValueAtTime(20, 0)
+        // filter.frequency.setValueAtTime(1000, 0)
+
+        mainOsc.connect(gain)
+        gain.connect(filter)
+        filter.connect(pan)
+
+        return {gain: gain.gain, freq: filter.frequency}
+      })
+    })
+    const positions = [
+      0.020858917883843395,
+      0.1805726119225623,
+      0.3402863059612812,
+      0.5,
+      0.659713694038719,
+      0.8194273880774379,
+      0.9791410821161567,
+    ]
+    this.updateLines = t => {
+      forRange(N, i => {
+        if (parameters.flipSound) {
+          i = 6 - i
+        }
+        const y = positions[i]
+        // const y = positions[6 - i]
+
+        const w1 = lerp(1,2,y)
+        // let px1 = (lerp(1,2,y) * (0 + t/3)) % 1
+
+        forRange(2, j => {
+          let x = lerp(-1, 1, Math.min(1, Math.max(0, ((j + (w1 * t/3)) % 2) / w1)))
+          let y = Math.min(1, Math.max(0, ((j + (w1 * t/4)) % 2) / w1))
+
+          if ((i % 2 == 0) != parameters.flipSound) {
+            x *= -1
+            y = 1 - y
+          }
+          rows[i][j].pan.setTargetAtTime(Math.sign(x) * exp(Math.abs(x), -0.7), 0, 1/60)
+          rows[i][j].gain.setTargetAtTime((1 - x ** 2) ** 3, 0, 1/60)
+
+          cols[i][j].freq.setTargetAtTime(lerp(2, 12, y) * F, 0, 1/60)
+          cols[i][j].gain.setTargetAtTime((1 - lerp(-1, 1, y) ** 2) * 8, 0, 1/60)
+        })
+      })
+      // const py = Math.cos(lerp(1,2,x) * 2 * Math.PI * (0 - (i % 2 ? 1 : -1) * t/4))
+
+
+    }
+
+    return mix
   }
 }
 
@@ -536,7 +1236,9 @@ const linearFlower = new LinearFlower()
 const pointLight = new THREE.PointLight();
 const ambientLight = new THREE.AmbientLight()
 
-const pattern = new Pattern(linearFlower, pointLight, ambientLight)
+const synth = new Synth(audioContext)
+
+const pattern = new Pattern(linearFlower, pointLight, ambientLight, synth)
 
 let camera, scene, renderer;
 let mesh, material;
@@ -705,22 +1407,30 @@ function animate() {
   render();
 }
 
-function render() {
-  const time = performance.now() / 1000 + PERIOD * (((parameters.phase % NUM_PHASES) + NUM_PHASES) % NUM_PHASES)
-
-  let t = time / 2
+function getLightPos (t) {
   const R = 4 * noise.simplex2(t / 3, 0)
   let u = t + noise.simplex2(0, t / 6)
   // const R = lerp(1, 4, unit(-1, 1, Math.cos(t / 3.7)))
-  const z = 1
-  pointLight.position.set(
+  return [
     R * Math.cos(u),
-    R * Math.sin(u),
-    z
-  )
+    R * Math.sin(u)
+  ]
+}
+function render() {
+  const time = performance.now() / 1000 + getPeriod() * (((parameters.phase % NUM_PHASES) + NUM_PHASES) % NUM_PHASES)
+
+  let t = time / 2
+  const [x1, y1] = getLightPos(t)
+  const z = 1
+  pointLight.position.set( x1, y1, z )
+
+  const [x0, y0] = getLightPos(t - 1/60)
+  if (synth && synth.updateShadow) {
+    synth.updateShadow(x1, y1, Math.hypot(x1 - x0, y1 - y0))
+  }
 
   if (parameters.test) {
-    pattern.drawTest()
+    pattern.drawTest(time)
     pointLight.castShadow = false
   } else {
     pointLight.castShadow = true
