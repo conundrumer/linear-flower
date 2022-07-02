@@ -30,7 +30,7 @@ noise.seed(Math.random())
 const PERIOD = 60
 const getPeriod = () => Math.max(1/6, parameters.period) * 60
 const NUM_PHASES = 6
-const NUM_TURTLES = 16
+const NUM_TURTLES = 32
 
 const forRange = (n, cb) => {
   for (let i = 0; i < n; i++) {
@@ -348,9 +348,11 @@ class CellGraph {
       period: lerp(1.5, 3, Math.random()),
       twistiness: lerp(0, 0.8, Math.random())
     }))
+    this.numTurtles = numTurtles
   }
   update(t, onStep) {
-    this.turtles.forEach((turtle, j) => {
+    forRange(this.numTurtles, j => {
+      const turtle = this.turtles[j]
       if (turtle.counter <= 0) {
         const adjacent = cellGraph[turtle.index]
         let nextIndex = adjacent[turtle.dir] || adjacent.X
@@ -563,6 +565,9 @@ class Pattern {
             this.synth.triggerTurtle(turn, x, y, i, deltaT * Math.random())
           }
         }
+        const k = (t / getPeriod()) % 1
+        this.graph.numTurtles = lerp(1, NUM_TURTLES, 1 - lerp(-1, 1, k) ** 2) | 0
+        console.log(this.graph.numTurtles)
         this.graph.update(t, onStep)
         ctx.globalCompositeOperation = "lighter"
         this.drawFaces(canvas, (index, row, col, x, y) => {
@@ -596,13 +601,10 @@ class Pattern {
       this.setPointLightIntensity(0)
     }
 
-    // phase = 4
+    // phase = 5
     // if (this.synth) {
     //   this.synth.setMix(t, phase, 0)
     // }
-
-    // this.drawPhase(t, phase, this.canvas)
-    // this.setPointLightIntensity(1)
 
     // this.drawPhase(t,phase, this.canvas)
     // this.setPointLightIntensity(0)
@@ -1042,7 +1044,7 @@ class Synth {
       const turtle = turtles[i][isTurn ? 1 : 0]
       if (!turtle) debugger
 
-      const a = 10 / NUM_TURTLES
+      const a = 20 / NUM_TURTLES
       const f = lerp(8000, 1000, exp(y + Math.random() * 1e-2, -1))
       const p = lerp(-1, 1, x)
 
